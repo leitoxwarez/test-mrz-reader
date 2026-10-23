@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Lector MRZ - Cédula Chilena Optimizado</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+:root{color-scheme:dark;--bg:#101722;--panel:#192536;--line:#2d4058;--accent:#39c6a4;--muted:#a9b8ca}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:#f3f6fa;font:14px/1.4 system-ui,Segoe UI,Arial;overflow-x:hidden}
+main{max-width:1200px;margin:auto;padding:12px}
+h1{font-size:1.3rem;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 10px;font-size:12px}
+.layout{display:grid;grid-template-columns:1.2fr 0.8fr;gap:12px;align-items:start}
+
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;min-width:0}
+h2{font-size:0.95rem;margin:0 0 8px}
+
+.viewer{
+  position:relative;
+  background:#05080d;
+  border-radius:10px;
+  overflow:hidden;
+  aspect-ratio:16/9;
+  cursor:pointer;
+  user-select:none;
+  touch-action:manipulation;
+}
+.viewer:active{outline:2px solid var(--accent)}
+video{width:100%;height:100%;object-fit:cover;display:block}
+
+.overlay{position:absolute;left:5%;top:58%;width:90%;height:36%;border:2px solid var(--accent);border-radius:7px;box-shadow:0 0 0 999px #0005;pointer-events:none}
+.overlay:before{content:"TOCA PARA CAPTURAR · ENCUADRE MRZ";position:absolute;top:-24px;left:0;background:var(--accent);color:#06231c;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px}
+
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+button,select{border:0;border-radius:7px;padding:8px 12px;font-weight:700;font-size:12px;cursor:pointer;background:var(--accent);color:#06231c}
+button.secondary{background:#34465e;color:#fff}
+button:disabled{opacity:.45;cursor:not-allowed}
+select{background:#101a28;color:#fff;border:1px solid var(--line);max-width:100%}
+
+.status{color:var(--accent);font-size:12px;margin-top:8px;min-height:18px;font-weight:600}
+.result{display:grid;gap:8px}
+.field{background:#101a28;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.field label,.small-label{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+.value{font-size:1rem;font-weight:650;overflow-wrap:anywhere;min-height:22px}
+.copyrow{display:flex;align-items:center;justify-content:between;gap:8px}
+.copyrow button{padding:4px 8px;font-size:11px}
+textarea{width:100%;margin-top:4px;background:#101a28;color:white;border:1px solid var(--line);border-radius:6px;padding:6px;font-size:11px}
+
+@media (orientation: landscape) and (max-height: 600px) {
+  main{padding:6px}
+  h1,.sub{display:none}
+  .layout{grid-template-columns:1fr 1fr;gap:8px}
+  .panel{padding:8px}
+  .viewer{aspect-ratio:4/3;max-height:65vh}
+}
+
+@media (max-width: 600px) and (orientation: portrait) {
+  .layout{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<main>
+  <h1>Lector MRZ · Cédula chilena</h1>
+  <p class="sub">Toca la pantalla sobre el video para capturar y leer datos automáticamente.</p>
+  <div class="layout">
+    <section class="panel">
+      <h2>1. Cámara Móvil / Local</h2>
+      <div class="viewer" id="viewer" title="Toca para tomar foto y procesar">
+        <video id="video" autoplay muted playsinline></video>
+        <div class="overlay"></div>
+      </div>
+      <div class="controls">
+        <select id="cameraSelect" aria-label="Seleccionar cámara"><option value="">Cámara Trasera</option></select>
+        <button id="startCamera">Activar cámara</button>
+        <button id="stopCamera" class="secondary" disabled>Detener</button>
+        <button id="once" class="secondary" disabled>📷 Capturar</button>
+      </div>
+      <div class="controls">
+        <button id="startOCR" disabled>Lectura Auto.</button>
+        <button id="stopOCR" class="secondary" disabled>Detener Auto.</button>
+        <button id="toggleContrast" class="secondary">Auto-Contraste: ON</button>
+      </div>
+      <div id="status" class="status">Listo para activar cámara.</div>
+    </section>
+
+    <section class="panel">
+      <h2>2. Datos Extraídos</h2>
+      <div class="result">
+        <div class="field"><label>RUT</label><div class="copyrow"><div id="rut" class="value">—</div><button onclick="copyField('rut')">Copiar</button></div></div>
+        <div class="field"><label>Apellidos</label><div class="copyrow"><div id="surnames" class="value">—</div><button onclick="copyField('surnames')">Copiar</button></div></div>
+        <div class="field"><label>Nombres</label><div class="copyrow"><div id="names" class="value">—</div><button onclick="copyField('names')">Copiar</button></div></div>
+      </div>
+      <div style="margin-top:8px">
+        <label class="small-label" for="raw">Texto OCR detectado</label>
+        <textarea id="raw" rows="3" placeholder="Líneas MRZ procesadas..."></textarea>
+        <div class="controls"><button id="parse" class="secondary">Re-Procesar</button><button id="copyall" class="secondary">Copiar Todo</button></div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+const video = document.getElementById('video');
+const viewer = document.getElementById('viewer');
+const cameraSelect = document.getElementById('cameraSelect');
+const statusEl = document.getElementById('status');
+const rawEl = document.getElementById('raw');
+
+let stream = null, worker = null, ocrRunning = false, busy = false, timer = null, lastOCR = '';
+let autoContrast = true;
+
+function setStatus(s) { statusEl.textContent = s; }
+
+function cleanLine(s) {
+  return s.toUpperCase()
+          .replace(/[\/\|\\\[\]\{\}]/g, '<')
+          .replace(/[^A-Z0-9<]/g, '');
+}
+
+function parseMRZ(rawText) {
+  if (!rawText || !rawText.trim()) {
+    document.getElementById('rut').textContent = '—';
+    document.getElementById('surnames').textContent = '—';
+    document.getElementById('names').textContent = '—';
+    return;
+  }
+
+  const rawLines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const lines = rawLines.map(cleanLine);
+
+  let rut = '—', surnames = '—', names = '—';
+
+  let line2 = lines.find(l => l.includes('CHL')) || '';
+  if (!line2) {
+    const fullText = lines.join('');
+    if (fullText.includes('CHL')) line2 = fullText.slice(fullText.indexOf('CHL'));
+  }
+
+  if (line2) {
+    const matchRut = line2.match(/CHL.*?([0-9]{7,8})<+([0-9K])/i);
+    if (matchRut) {
+      rut = `${matchRut[1]}-${matchRut[2]}`;
+    } else {
+      const chlIndex = line2.indexOf('CHL');
+      if (chlIndex !== -1) {
+        const sub = line2.slice(chlIndex + 3);
+        const altMatch = sub.match(/([0-9]{7,8})<+([0-9K])/i);
+        if (altMatch) rut = `${altMatch[1]}-${altMatch[2]}`;
+      }
+    }
+  }
+
+  let line3 = lines.find(l => !l.includes('INCHL') && !l.includes('CHL') && /[A-Z]{3,}/.test(l)) || '';
+  if (!line3 && lines.length >= 3) line3 = lines[2];
+  else if (!line3 && lines.length > 0) line3 = lines[lines.length - 1];
+
+  if (line3) {
+    const normalized = line3.replace(/<[IL1_~]/g, '<<');
+    const splitIdx = normalized.indexOf('<<');
+
+    if (splitIdx !== -1) {
+      const surnamePart = normalized.slice(0, splitIdx);
+      const namePart = normalized.slice(splitIdx + 2);
+      surnames = surnamePart.replace(/</g, ' ').replace(/\s+/g, ' ').trim() || '—';
+      names = namePart.replace(/</g, ' ').replace(/\s+/g, ' ').trim() || '—';
+    } else {
+      const parts = line3.split('<').filter(p => p.length > 0);
+      if (parts.length >= 2) {
+        surnames = parts[0].trim();
+        names = parts.slice(1).join(' ').trim();
+      }
+    }
+  }
+
+  document.getElementById('rut').textContent = rut;
+  document.getElementById('surnames').textContent = surnames;
+  document.getElementById('names').textContent = names;
+
+  if (rut === '—' && surnames === '—' && names === '—') {
+    setStatus('⚠️ No se reconocieron datos claros. Enfoca y vuelve a tocar.');
+  } else {
+    setStatus('✅ Datos capturados correctamente.');
+  }
+}
+
+document.getElementById('parse').onclick = () => parseMRZ(rawEl.value);
+
+document.getElementById('toggleContrast').onclick = () => {
+  autoContrast = !autoContrast;
+  document.getElementById('toggleContrast').textContent = `Auto-Contraste: ${autoContrast ? 'ON' : 'OFF'}`;
+};
+
+async function refreshCameras(){
+  try{
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cams = devices.filter(d => d.kind === 'videoinput');
+    const previous = cameraSelect.value;
+    cameraSelect.innerHTML = '<option value="">Cámara Trasera (Auto)</option>';
+    cams.forEach((c, i) => {
+      const o = document.createElement('option');
+      o.value = c.deviceId;
+      o.textContent = c.label || `Cámara ${i+1}`;
+      cameraSelect.appendChild(o);
+    });
+    if (previous && cams.some(c => c.deviceId === previous)) cameraSelect.value = previous;
+  }catch(e){ console.error(e); }
+}
+
+async function startCamera(){
+  if(!navigator.mediaDevices?.getUserMedia){ 
+    setStatus('Error: El navegador no soporta acceso a cámara.'); 
+    return; 
+  }
+  stopCamera();
+  setStatus('Activando cámara...');
+
+  const id = cameraSelect.value;
+  let constraints = {};
+
+  if (id) {
+    constraints = { audio: false, video: { deviceId: { exact: id } } };
+  } else {
+    // Intento 1: Forzar trasera de forma flexible (compatible con más móviles Android)
+    constraints = { audio: false, video: { facingMode: { ideal: 'environment' } } };
+  }
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (err1) {
+    try {
+      // Intento 2: Bajar restricciones a genérico si falla
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+    } catch (err2) {
+      setStatus('No se pudo acceder a la cámara. Revisa permisos o usa HTTPS.');
+      console.error(err2);
+      return;
+    }
+  }
+
+  video.srcObject = stream;
+  try {
+    await video.play();
+  } catch(e) {
+    console.error(e);
+  }
+
+  await refreshCameras();
+  document.getElementById('startOCR').disabled = false;
+  document.getElementById('once').disabled = false;
+  document.getElementById('stopCamera').disabled = false;
+  setStatus('Cámara activa. Toca el visor para capturar.');
+}
+
+function stopCamera(){
+  stopOCR();
+  if(stream){ stream.getTracks().forEach(t => t.stop()); stream = null; }
+  video.srcObject = null;
+  document.getElementById('startOCR').disabled = true;
+  document.getElementById('once').disabled = true;
+  document.getElementById('stopCamera').disabled = true;
+  setStatus('Cámara detenida.');
+}
+
+async function getWorker(){
+  if(!worker){
+    setStatus('Cargando motor OCR...');
+    worker = await Tesseract.createWorker('eng', 1, {
+      logger: m => { if(m.status==='recognizing text') setStatus('Procesando: '+Math.round((m.progress||0)*100)+'%'); }
+    });
+    await worker.setParameters({
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<',
+      preserve_interword_spaces: '1',
+      tessedit_pageseg_mode: '6'
+    });
+  }
+  return worker;
+}
+
+async function readFrame(){
+  if(!stream || video.readyState < 2 || busy) return;
+  busy = true;
+  setStatus('Procesando imagen...');
+  try{
+    const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
+    const sx = Math.round(vw * 0.05), sy = Math.round(vh * 0.58), sw = Math.round(vw * 0.90), sh = Math.round(vh * 0.36);
+
+    const scale = 2;
+    const canvas = document.createElement('canvas');
+    canvas.width = sw * scale;
+    canvas.height = sh * scale;
+    const ctx = canvas.getContext('2d');
+
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+
+    if (autoContrast) {
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imgData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const v = (data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114);
+        const bw = v < 120 ? 0 : 255;
+        data[i] = bw;
+        data[i + 1] = bw;
+        data[i + 2] = bw;
+      }
+      ctx.putImageData(imgData, 0, 0);
+    }
+
+    const w = await getWorker();
+    const result = await w.recognize(canvas);
+    const txt = result.data.text || '';
+
+    if(txt.trim()){
+      rawEl.value = txt;
+      parseMRZ(txt);
+    } else {
+      setStatus('No se detectó texto. Enfoca mejor y vuelve a tocar.');
+    }
+  }catch(e){
+    setStatus('Error OCR: ' + e.message);
+  }finally{
+    busy = false;
+  }
+}
+
+viewer.addEventListener('click', () => {
+  if (stream && !busy) {
+    readFrame();
+  }
+});
+
+document.getElementById('startCamera').onclick = startCamera;
+document.getElementById('stopCamera').onclick = stopCamera;
+cameraSelect.onchange = () => { if(stream) startCamera(); };
+document.getElementById('once').onclick = readFrame;
+
+document.getElementById('startOCR').onclick = async () => {
+  if(ocrRunning) return;
+  try{
+    await getWorker();
+    ocrRunning = true;
+    document.getElementById('startOCR').disabled = true;
+    document.getElementById('stopOCR').disabled = false;
+    readFrame();
+    timer = setInterval(readFrame, 1500);
+  }catch(e){ setStatus('No se pudo iniciar OCR auto: ' + e.message); }
+};
+
+function stopOCR(){
+  ocrRunning = false;
+  clearInterval(timer);
+  document.getElementById('startOCR').disabled = !stream;
+  document.getElementById('stopOCR').disabled = true;
+}
+
+document.getElementById('stopOCR').onclick = stopOCR;
+
+function copyField(id){
+  const t = document.getElementById(id).textContent;
+  if(t && t !== '—') navigator.clipboard.writeText(t);
+}
+
+document.getElementById('copyall').onclick = () => {
+ const t = 'RUT: ' + document.getElementById('rut').textContent + '\nApellidos: ' + document.getElementById('surnames').textContent + '\nNombres: ' + document.getElementById('names').textContent;
+ navigator.clipboard.writeText(t).then(() => setStatus('Resultados copiados.')).catch(() => setStatus('Error al copiar.'));
+};
+
+window.copyField = copyField;
+window.addEventListener('beforeunload', () => { if(stream) stream.getTracks().forEach(t => t.stop()); });
+if(navigator.mediaDevices?.addEventListener) navigator.mediaDevices.addEventListener('devicechange', refreshCameras);
+</script>
+</body>
+</html>
