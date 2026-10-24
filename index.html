@@ -13,7 +13,6 @@ main{max-width:800px;margin:auto;padding:12px}
 .header-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 h1{font-size:1.2rem;margin:0}
 
-/* Estructura universal en columna única para que la cámara quede arriba y los datos abajo (tanto en vertical como en horizontal) */
 .layout{display:grid;grid-template-columns:1fr;gap:12px;align-items:start}
 
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;min-width:0}
@@ -40,13 +39,28 @@ video{width:100%;height:100%;object-fit:cover;display:block}
 button,select,input{border:0;border-radius:7px;padding:8px 12px;font-weight:700;font-size:12px;cursor:pointer;background:var(--accent);color:#06231c}
 button.secondary{background:#34465e;color:#fff}
 button:disabled{opacity:.45;cursor:not-allowed}
-select,input{background:#101a28;color:#fff;border:1px solid var(--line);width:100%}
+select{background:#101a28;color:#fff;border:1px solid var(--line);width:100%}
 
 .status{color:var(--accent);font-size:12px;margin-top:8px;min-height:18px;font-weight:600}
 .result{display:grid;gap:8px}
 .field{background:#101a28;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
 .field label,.small-label{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
-.value{font-size:1rem;font-weight:650;overflow-wrap:anywhere;min-height:22px}
+
+/* Inputs editables para corregir datos capturados */
+.editable-input{
+  width:100%;
+  background:transparent;
+  border:none;
+  color:#fff;
+  font-size:1rem;
+  font-weight:650;
+  outline:none;
+  padding:2px 0;
+}
+.editable-input:focus{
+  border-bottom:1px solid var(--accent);
+}
+
 .copyrow{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .copyrow button{padding:4px 8px;font-size:11px}
 textarea{width:100%;margin-top:4px;background:#101a28;color:white;border:1px solid var(--line);border-radius:6px;padding:6px;font-size:11px}
@@ -54,11 +68,11 @@ textarea{width:100%;margin-top:4px;background:#101a28;color:white;border:1px sol
 .modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:99;justify-content:center;align-items:center;padding:16px}
 .modal.open{display:flex}
 .modal-content{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;max-width:500px;width:100%}
+.modal-content input{width:100%;background:#101a28;color:#fff;border:1px solid var(--line);padding:8px;margin-top:4px}
 
-/* Ajuste específico para cuando el móvil está en horizontal (Landscape) */
 @media (orientation: landscape) {
   main{max-width:700px;padding:8px}
-  .viewer{aspect-ratio:21/9;max-height:50vh;} /* Hace la cámara más ancha y panorámica en horizontal */
+  .viewer{aspect-ratio:21/9;max-height:50vh;}
 }
 </style>
 </head>
@@ -85,11 +99,29 @@ textarea{width:100%;margin-top:4px;background:#101a28;color:white;border:1px sol
     </section>
 
     <section class="panel">
-      <h2>2. Datos Capturados</h2>
+      <h2>2. Datos Capturados (Editables)</h2>
       <div class="result">
-        <div class="field"><label>RUT</label><div class="copyrow"><div id="rut" class="value">—</div><button onclick="copyField('rut')">Copiar</button></div></div>
-        <div class="field"><label>Apellidos</label><div class="copyrow"><div id="surnames" class="value">—</div><button onclick="copyField('surnames')">Copiar</button></div></div>
-        <div class="field"><label>Nombres</label><div class="copyrow"><div id="names" class="value">—</div><button onclick="copyField('names')">Copiar</button></div></div>
+        <div class="field">
+          <label>RUT</label>
+          <div class="copyrow">
+            <input type="text" id="rut" class="editable-input" value="—" placeholder="Ej: 12345678-K">
+            <button onclick="copyField('rut')">Copiar</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Apellidos</label>
+          <div class="copyrow">
+            <input type="text" id="surnames" class="editable-input" value="—" placeholder="Apellidos">
+            <button onclick="copyField('surnames')">Copiar</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Nombres</label>
+          <div class="copyrow">
+            <input type="text" id="names" class="editable-input" value="—" placeholder="Nombres">
+            <button onclick="copyField('names')">Copiar</button>
+          </div>
+        </div>
       </div>
       <div class="controls" style="margin-top:10px">
         <button id="sendSheetsBtn" class="secondary" style="width:100%">📊 Enviar a Google Sheets</button>
@@ -180,14 +212,14 @@ function parseMRZ(rawText) {
     }
   }
 
-  document.getElementById('rut').textContent = rut;
-  document.getElementById('surnames').textContent = surnames;
-  document.getElementById('names').textContent = names;
+  document.getElementById('rut').value = rut;
+  document.getElementById('surnames').value = surnames;
+  document.getElementById('names').value = names;
 
   if (rut === '—' && surnames === '—' && names === '—') {
-    setStatus('⚠️ No se reconocieron datos claros. Reintenta.');
+    setStatus('⚠️ No se reconocieron datos claros. Puedes escribirlos manualmente.');
   } else {
-    setStatus('✅ Lectura completada. Presiona "Enviar a Google Sheets" para registrar.');
+    setStatus('✅ Lectura completada. Puedes corregir los campos y enviar.');
   }
 }
 
@@ -301,8 +333,11 @@ document.getElementById('stopCamera').onclick = stopCamera;
 cameraSelect.onchange = () => { if(stream) startCamera(); };
 
 function copyField(id){
-  const t = document.getElementById(id).textContent;
-  if(t && t !== '—') navigator.clipboard.writeText(t);
+  const t = document.getElementById(id).value;
+  if(t && t !== '—') {
+    navigator.clipboard.writeText(t);
+    setStatus('Copiado al portapapeles.');
+  }
 }
 
 const modal = document.getElementById('modalSettings');
@@ -325,8 +360,8 @@ async function sendToGoogleSheets(rut, surnames, names) {
     return;
   }
 
-  if (rut === '—' && surnames === '—') {
-    setStatus('⚠️ No hay datos válidos para enviar.');
+  if (!rut || rut === '—') {
+    setStatus('⚠️ Ingresa un RUT válido antes de enviar.');
     return;
   }
 
@@ -349,9 +384,9 @@ async function sendToGoogleSheets(rut, surnames, names) {
 }
 
 document.getElementById('sendSheetsBtn').onclick = () => {
-  const rut = document.getElementById('rut').textContent;
-  const surnames = document.getElementById('surnames').textContent;
-  const names = document.getElementById('names').textContent;
+  const rut = document.getElementById('rut').value.trim();
+  const surnames = document.getElementById('surnames').value.trim();
+  const names = document.getElementById('names').value.trim();
   sendToGoogleSheets(rut, surnames, names);
 };
 
