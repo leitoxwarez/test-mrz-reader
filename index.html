@@ -9,15 +9,16 @@
 :root{color-scheme:dark;--bg:#101722;--panel:#192536;--line:#2d4058;--accent:#39c6a4;--muted:#a9b8ca}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:#f3f6fa;font:14px/1.4 system-ui,Segoe UI,Arial;overflow-x:hidden}
-main{max-width:1100px;margin:auto;padding:12px}
+main{max-width:800px;margin:auto;padding:12px}
 .header-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
 h1{font-size:1.2rem;margin:0}
-.layout{display:grid;grid-template-columns:1.2fr 0.8fr;gap:12px;align-items:start}
+
+/* Estructura universal en columna única para que la cámara quede arriba y los datos abajo (tanto en vertical como en horizontal) */
+.layout{display:grid;grid-template-columns:1fr;gap:12px;align-items:start}
 
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;min-width:0}
 h2{font-size:0.95rem;margin:0 0 8px}
 
-/* Visor interactivo */
 .viewer{
   position:relative;
   background:#05080d;
@@ -27,6 +28,7 @@ h2{font-size:0.95rem;margin:0 0 8px}
   cursor:pointer;
   user-select:none;
   touch-action:manipulation;
+  width:100%;
 }
 .viewer:active{outline:2px solid var(--accent)}
 video{width:100%;height:100%;object-fit:cover;display:block}
@@ -49,21 +51,14 @@ select,input{background:#101a28;color:#fff;border:1px solid var(--line);width:10
 .copyrow button{padding:4px 8px;font-size:11px}
 textarea{width:100%;margin-top:4px;background:#101a28;color:white;border:1px solid var(--line);border-radius:6px;padding:6px;font-size:11px}
 
-/* Modal de Configuración */
 .modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:99;justify-content:center;align-items:center;padding:16px}
 .modal.open{display:flex}
 .modal-content{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;max-width:500px;width:100%}
 
-@media (orientation: landscape) and (max-height: 600px) {
-  main{padding:6px}
-  .header-row{margin-bottom:4px}
-  .layout{grid-template-columns:1fr 1fr;gap:8px}
-  .panel{padding:8px}
-  .viewer{aspect-ratio:4/3;max-height:65vh}
-}
-
-@media (max-width: 600px) and (orientation: portrait) {
-  .layout{grid-template-columns:1fr}
+/* Ajuste específico para cuando el móvil está en horizontal (Landscape) */
+@media (orientation: landscape) {
+  main{max-width:700px;padding:8px}
+  .viewer{aspect-ratio:21/9;max-height:50vh;} /* Hace la cámara más ancha y panorámica en horizontal */
 }
 </style>
 </head>
@@ -107,11 +102,10 @@ textarea{width:100%;margin-top:4px;background:#101a28;color:white;border:1px sol
   </div>
 </main>
 
-<!-- Modal de Ajustes -->
 <div id="modalSettings" class="modal">
   <div class="modal-content">
     <h2>⚙️ Configuración de Google Sheets</h2>
-    <p style="font-size:12px;color:var(--muted)">Pega la URL de tu Google Apps Script Web App para sincronizar las lecturas:</p>
+    <p style="font-size:12px;color:var(--muted)">Pega la URL de tu Google Apps Script Web App:</p>
     <div style="margin-bottom:12px">
       <label class="small-label">URL del Web App Script:</label>
       <input type="text" id="sheetsUrlInput" placeholder="https://script.google.com/macros/s/.../exec">
@@ -193,8 +187,7 @@ function parseMRZ(rawText) {
   if (rut === '—' && surnames === '—' && names === '—') {
     setStatus('⚠️ No se reconocieron datos claros. Reintenta.');
   } else {
-    setStatus('✅ Lectura completada.');
-    sendToGoogleSheets(rut, surnames, names);
+    setStatus('✅ Lectura completada. Presiona "Enviar a Google Sheets" para registrar.');
   }
 }
 
@@ -302,7 +295,6 @@ async function readFrame(){
   }
 }
 
-// Escuchar toque en la pantalla
 viewer.addEventListener('click', () => { if (stream && !busy) readFrame(); });
 document.getElementById('startCamera').onclick = startCamera;
 document.getElementById('stopCamera').onclick = stopCamera;
@@ -313,7 +305,6 @@ function copyField(id){
   if(t && t !== '—') navigator.clipboard.writeText(t);
 }
 
-// Configuración y Envío a Google Sheets
 const modal = document.getElementById('modalSettings');
 document.getElementById('openSettings').onclick = () => {
   document.getElementById('sheetsUrlInput').value = localStorage.getItem('sheets_web_app_url') || '';
@@ -328,22 +319,32 @@ document.getElementById('saveSettings').onclick = () => {
 };
 
 async function sendToGoogleSheets(rut, surnames, names) {
-  const url = localStorage.getItem('sheets_web_app_url');
-  if(!url) return;
+  const baseUrl = localStorage.getItem('sheets_web_app_url');
+  if(!baseUrl) {
+    setStatus('⚠️ Configura primero la URL en Settings.');
+    return;
+  }
 
-  if (rut === '—' && surnames === '—') return;
+  if (rut === '—' && surnames === '—') {
+    setStatus('⚠️ No hay datos válidos para enviar.');
+    return;
+  }
 
   setStatus('Enviando a Google Sheets...');
   try {
-    await fetch(url, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rut, surnames, names, timestamp: new Date().toLocaleString() })
-    });
-    setStatus('✅ Guardado en Google Sheets.');
+    const timestamp = encodeURIComponent(new Date().toLocaleString());
+    const encodedRut = encodeURIComponent(rut);
+    const encodedSurnames = encodeURIComponent(surnames);
+    const encodedNames = encodeURIComponent(names);
+
+    const fullUrl = `${baseUrl}?timestamp=${timestamp}&rut=${encodedRut}&surnames=${encodedSurnames}&names=${encodedNames}`;
+
+    await fetch(fullUrl, { method: 'GET', mode: 'no-cors' });
+    
+    setStatus('✅ Datos guardados con éxito en Google Sheets.');
   } catch(e) {
-    setStatus('⚠️ Error guardando en Sheets.');
+    setStatus('⚠️ Error al enviar a Sheets.');
+    console.error(e);
   }
 }
 
